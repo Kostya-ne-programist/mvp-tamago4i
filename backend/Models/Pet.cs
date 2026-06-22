@@ -12,5 +12,6 @@ public class Pet
     public int Experience { get; set; } = 0;
     public int Coins { get; set; } = 100;
     public bool IsAlive { get; set; } = true;
+    public DateTime? LastDailyBonus { get; set; } = null;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -34,6 +34,12 @@ builder.Services.AddAuthorization();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
+    options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+    {
+        Title = "Тамагочі MVP API",
+        Version = "v1",
+        Description = "REST API для гри Тамагочі"
+    });
     options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
@@ -233,10 +239,113 @@ app.MapGet("/pets/{id}/wallet", async (int id, AppDbContext db) =>
     });
 }).WithTags("Pets");
 
+app.MapPost("/pets/{id}/daily", async (int id, AppDbContext db) =>
+{
+    var pet = await db.Pets.FindAsync(id);
+    if (pet is null) return Results.NotFound();
+    if (!pet.IsAlive) return Results.BadRequest(new { message = "Питомець помер." });
+    if (pet.LastDailyBonus.HasValue && pet.LastDailyBonus.Value.Date == DateTime.UtcNow.Date)
+        return Results.BadRequest(new { message = "🕐 Бонус вже отримано сьогодні! Приходь завтра." });
+    pet.Coins += 50;
+    pet.Health = Math.Min(100, pet.Health + 20);
+    pet.LastDailyBonus = DateTime.UtcNow;
+    await db.SaveChangesAsync();
+    return Results.Ok(new { message = "🎁 Щоденний бонус отримано! +50 монет +20 здоров'я!", pet });
+}).WithTags("Pets");
+
+app.MapGet("/pets/top", async (AppDbContext db) =>
+{
+    var top = await db.Pets
+        .Where(p => p.IsAlive)
+        .OrderByDescending(p => p.Level)
+        .ThenByDescending(p => p.Experience)
+        .Take(5)
+        .Select(p => new { p.Id, p.Name, p.Species, p.Level, p.Experience, p.Coins })
+        .ToListAsync();
+    return Results.Ok(top);
+}).WithTags("Pets");
+
+app.MapPost("/pets/{id}/levelup", async (int id, AppDbContext db) =>
+{
+    var pet = await db.Pets.FindAsync(id);
+    if (pet is null) return Results.NotFound();
+    if (!pet.IsAlive) return Results.BadRequest(new { message = "Питомець помер." });
+    int expNeeded = pet.Level * 100;
+    if (pet.Experience < expNeeded)
+        return Results.BadRequest(new { message = $"Недостатньо досвіду! Потрібно {expNeeded}, є {pet.Experience}." });
+    pet.Level += 1;
+    pet.Experience -= expNeeded;
+    pet.Coins += 50;
+    pet.Health = 100;
+    await db.SaveChangesAsync();
+    return Results.Ok(new { message = $"🎉 Рівень підвищено до {pet.Level}! +50 монет, здоров'я відновлено!", pet });
+}).WithTags("Pets");
+
+app.MapPost("/pets/{id}/train", async (int id, AppDbContext db) =>
+{
+    var pet = await db.Pets.FindAsync(id);
+    if (pet is null) return Results.NotFound();
+    if (!pet.IsAlive) return Results.BadRequest(new { message = "Питомець помер." });
+    if (pet.Coins < 20)
+        return Results.BadRequest(new { message = "Недостатньо монет! Потрібно 20." });
+    pet.Coins -= 20;
+    pet.Experience += 50;
+    pet.Hunger = Math.Min(100, pet.Hunger + 20);
+    pet.Happiness = Math.Max(0, pet.Happiness - 10);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { message = "💪 Питомець потренувався! +50 досвіду, -20 монет.", pet });
+}).WithTags("Pets");
+
+app.MapGet("/pets/dead", async (AppDbContext db) =>
+{
+    var dead = await db.Pets
+        .Where(p => !p.IsAlive)
+        .Select(p => new { p.Id, p.Name, p.Species, p.Level, p.Experience })
+        .ToListAsync();
+    return Results.Ok(dead);
+}).WithTags("Pets");
+
 // SHOP
 app.MapGet("/shop", async (AppDbContext db) =>
     await db.ShopItems.ToListAsync())
     .WithTags("Shop");
+
+app.MapGet("/shop/{id}", async (int id, AppDbContext db) =>
+{
+    var item = await db.ShopItems.FindAsync(id);
+    if (item is null) return Results.NotFound();
+    return Results.Ok(item);
+}).WithTags("Shop");
+
+app.MapPost("/shop", async (ShopItem item, AppDbContext db) =>
+{
+    db.ShopItems.Add(item);
+    await db.SaveChangesAsync();
+    return Results.Created($"/shop/{item.Id}", item);
+}).WithTags("Shop");
+
+app.MapDelete("/shop/{id}", async (int id, AppDbContext db) =>
+{
+    var item = await db.ShopItems.FindAsync(id);
+    if (item is null) return Results.NotFound();
+    db.ShopItems.Remove(item);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+}).WithTags("Shop");
+
+app.MapPut("/shop/{id}", async (int id, ShopItem input, AppDbContext db) =>
+{
+    var item = await db.ShopItems.FindAsync(id);
+    if (item is null) return Results.NotFound();
+    item.Name = input.Name;
+    item.Effect = input.Effect;
+    item.Price = input.Price;
+    item.HungerEffect = input.HungerEffect;
+    item.HappinessEffect = input.HappinessEffect;
+    item.HealthEffect = input.HealthEffect;
+    await db.SaveChangesAsync();
+    return Results.Ok(item);
+}).WithTags("Shop");
 
 // AUTH
 app.MapPost("/auth/register", async (RegisterDto dto, AppDbContext db) =>
